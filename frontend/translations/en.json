@@ -1,0 +1,8 @@
+{
+  "app": {
+    "name": "Intelligent CX Triage Agent",
+    "short_description": "Zendesk-Connected AI Middleware Gateway utilizing Claude SDK.",
+    "long_description": "An intelligent AI agent layer running in your Zendesk ticket sidebar that categorizes tickets, executes sentiment analysis, queries help center articles, and drafts agent responses using Claude.",
+    "installation_instructions": "Specify your backend Express API endpoint to complete integration."
+  }
+}

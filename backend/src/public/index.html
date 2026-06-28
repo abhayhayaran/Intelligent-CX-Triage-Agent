@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intelligent CX Triage Agent - Dev Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: rgba(30, 41, 59, 0.7);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --primary-glow: rgba(99, 102, 241, 0.3);
+      --accent-emerald: #10b981;
+      --accent-cyan: #06b6d4;
+      --accent-rose: #f43f5e;
+      --accent-amber: #f59e0b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.1) 0px, transparent 50%);
+    }
+
+    header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      backdrop-filter: blur(12px);
+      background-color: rgba(15, 23, 42, 0.6);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo-badge {
+      background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.25rem;
+      color: white;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      background: linear-gradient(to right, #ffffff, #cbd5e1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .badge.active-mode {
+      background-color: rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.3);
+      color: #818cf8;
+    }
+
+    main {
+      flex: 1;
+      padding: 2rem;
+      max-width: 1600px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 450px 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 1.5rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 0.75rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .input-wrapper {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    input, textarea {
+      background-color: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      color: var(--text-main);
+      padding: 0.75rem 1rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      width: 100%;
+      transition: all 0.2s;
+    }
+
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-glow);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    .btn-secondary {
+      background-color: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      border-radius: 10px;
+      padding: 0.75rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-secondary:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 0.85rem 1.5rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 4px 12px var(--primary-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px var(--primary-glow);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .quick-templates {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .template-item {
+      background-color: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 0.75rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: all 0.2s;
+      text-align: left;
+    }
+
+    .template-item:hover {
+      background-color: rgba(99, 102, 241, 0.05);
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+
+    .template-title {
+      font-weight: 600;
+      color: #818cf8;
+      margin-bottom: 0.25rem;
+    }
+
+    .template-preview {
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Terminal logs */
+    .terminal-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      height: 100%;
+      min-height: 500px;
+    }
+
+    .terminal-header {
+      background-color: #0f172a;
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 0.4rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-red { background-color: var(--accent-rose); }
+    .dot-yellow { background-color: var(--accent-amber); }
+    .dot-green { background-color: var(--accent-emerald); }
+
+    .terminal-body {
+      background-color: #020617;
+      border: 1px solid var(--border-color);
+      border-bottom-left-radius: 20px;
+      border-bottom-right-radius: 20px;
+      padding: 1.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-height: 600px;
+    }
+
+    .log-entry {
+      animation: fadeIn 0.2s ease-out forwards;
+      border-left: 2px solid var(--border-color);
+      padding-left: 0.75rem;
+    }
+
+    .log-info {
+      color: var(--text-muted);
+      border-left-color: var(--text-muted);
+    }
+
+    .log-tool-start {
+      color: var(--accent-cyan);
+      border-left-color: var(--accent-cyan);
+      background-color: rgba(6, 182, 212, 0.03);
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+    }
+
+    .log-tool-success {
+      color: var(--accent-emerald);
+      border-left-color: var(--accent-emerald);
+      background-color: rgba(16, 185, 129, 0.03);
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+    }
+
+    .log-tool-error {
+      color: var(--accent-rose);
+      border-left-color: var(--accent-rose);
+      background-color: rgba(244, 63, 94, 0.03);
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+    }
+
+    .log-error {
+      color: var(--accent-rose);
+      border-left-color: var(--accent-rose);
+      font-weight: 600;
+    }
+
+    .log-complete {
+      color: #a78bfa;
+      border-left-color: #8b5cf6;
+      background-color: rgba(139, 92, 246, 0.05);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .json-preview {
+      display: block;
+      padding: 0.5rem;
+      background-color: rgba(0, 0, 0, 0.3);
+      border-radius: 6px;
+      margin-top: 0.5rem;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-size: 0.8rem;
+    }
+
+    /* Bottom Results Section */
+    .results-grid {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+      .results-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .result-box {
+      background-color: rgba(30, 41, 59, 0.4);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 1.25rem;
+    }
+
+    .result-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .ticket-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.25rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .detail-label {
+      color: var(--text-muted);
+    }
+
+    .detail-val {
+      font-weight: 500;
+    }
+
+    .draft-body-preview {
+      background-color: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      color: #cbd5e1;
+      max-height: 250px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    .highlight-pill {
+      font-size: 0.75rem;
+      padding: 0.1rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .pill-urgent { background-color: rgba(244, 63, 94, 0.15); color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.3); }
+    .pill-high { background-color: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .pill-normal { background-color: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); border: 1px solid rgba(6, 182, 212, 0.3); }
+    .pill-low { background-color: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    .tag-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.25rem;
+    }
+
+    .tag-pill {
+      font-size: 0.7rem;
+      background-color: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      padding: 0.05rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    /* ZCLI Sandbox helper text */
+    .zcli-helper {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      background-color: rgba(245, 158, 11, 0.05);
+      border: 1px solid rgba(245, 158, 11, 0.15);
+      border-radius: 8px;
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo-container">
+      <div class="logo-badge">🤖</div>
+      <div>
+        <h1>Intelligent CX Triage Agent</h1>
+        <div style="font-size: 0.75rem; color: var(--text-muted);">Zendesk-Connected AI Middleware Gateway</div>
+      </div>
+    </div>
+    <div style="display: flex; gap: 1rem; align-items: center;">
+      <span class="badge" id="backend-mode-badge">Detecting...</span>
+      <span class="badge active-mode">v1.0.0</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Left Column: Controls -->
+    <div style="display: flex; flex-direction: column; gap: 2rem;">
+      <div class="card">
+        <div class="card-title">
+          <span>Triage Simulator</span>
+          <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-muted);">Incoming Payload</span>
+        </div>
+
+        <div class="form-group">
+          <label for="requestId-input">Idempotency Key (Request ID)</label>
+          <div class="input-wrapper">
+            <input type="text" id="requestId-input" placeholder="Generating key...">
+            <button class="btn-secondary" id="regen-id-btn" title="Generate New Key">🔄</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="query-input">Customer Support Query (Email / Chat Message)</label>
+          <textarea id="query-input" placeholder="Type a customer request here..."></textarea>
+        </div>
+
+        <button class="btn-primary" id="trigger-triage-btn">
+          <span>🚀 Run AI Triage Engine</span>
+        </button>
+
+        <div class="zcli-helper" id="zcli-dev-tip" style="display: none;">
+          <div style="color: var(--accent-amber); font-weight: 600;">🛠️ Real Zendesk Mode Active</div>
+          <div>Use <code style="background: rgba(0,0,0,0.3); padding: 0.1rem 0.25rem; border-radius: 3px;">zcli apps:server</code> in the frontend folder to load your sidebar app directly inside Zendesk Sandbox with this created ticket ID!</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Test Templates</div>
+        <div class="quick-templates">
+          <button class="template-item" data-query="Subject: Refund query regarding invoice INV-9908. Hi, I cancelled my subscription last Tuesday (which is within my 14-day refund window) but I still see a full charge on my credit card. Please process this refund immediately, I am extremely frustrated. Thanks, Bob.">
+            <div class="template-title">💳 Urgent Refund Complaint</div>
+            <div class="template-preview">I cancelled my subscription last Tuesday but still see a full charge...</div>
+          </button>
+          <button class="template-item" data-query="Hello, I am trying to connect my custom domain to my account but it says DNS verification failed. I added an A record to 192.0.2.1 and a www CNAME pointing to domains.example.com. Can you check why DNS is not updating? My domain is my-cool-store.com. Thanks, Sarah.">
+            <div class="template-title">🌐 DNS / Custom Domain Setup</div>
+            <div class="template-preview">I am trying to connect my custom domain but DNS verification failed...</div>
+          </button>
+          <button class="template-item" data-query="Hi support, I forgot my account login password. I clicked on forgot password button but I have not received any password reset email in my inbox or spam folder. Please help me get access back to my account immediately. Username: john.doe@example.com.">
+            <div class="template-title">🔑 Account Access Password Reset</div>
+            <div class="template-preview">I forgot my password. Clicked forgot password but haven't received email...</div>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Terminal Logs & SSE Execution -->
+    <div style="display: flex; flex-direction: column; gap: 2rem;">
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <div class="dot dot-red"></div>
+            <div class="dot dot-yellow"></div>
+            <div class="dot dot-green"></div>
+          </div>
+          <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">Claude SDK Agent Event Loop (SSE)</span>
+        </div>
+        <div class="terminal-body" id="terminal-logs">
+          <div style="color: var(--text-muted); text-align: center; margin-top: auto; margin-bottom: auto; padding: 2rem;">
+            Awaiting query submission to stream agentic actions.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom: Database Record Inspect Area -->
+    <div class="results-grid" id="results-section" style="display: none;">
+      <!-- Ticket Card -->
+      <div class="result-box card">
+        <div class="card-title">
+          <span>Database Ticket Log</span>
+          <span class="badge" style="background: rgba(16, 185, 129, 0.1); color: var(--accent-emerald);" id="ticket-mode-indicator">Created</span>
+        </div>
+        <div class="ticket-details">
+          <div class="detail-row">
+            <span class="detail-label">Ticket ID:</span>
+            <span class="detail-val" id="res-ticket-id">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Subject:</span>
+            <span class="detail-val" id="res-ticket-subject">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Priority:</span>
+            <span class="detail-val" id="res-ticket-priority">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Status:</span>
+            <span class="detail-val" id="res-ticket-status">-</span>
+          </div>
+          <div class="detail-row" style="flex-direction: column; align-items: flex-start; gap: 0.25rem;">
+            <span class="detail-label">Categorization Tags:</span>
+            <div class="tag-container" id="res-ticket-tags"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Draft Card -->
+      <div class="result-box card">
+        <div class="card-title">
+          <span>AI Pre-Written Draft Response</span>
+          <span class="badge" style="background: rgba(99, 102, 241, 0.1); color: #818cf8;" id="res-draft-confidence">Confidence: -</span>
+        </div>
+        <div class="ticket-details">
+          <div class="draft-body-preview" id="res-draft-body">Awaiting draft...</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="console.js"></script>
+</body>
+</html>
