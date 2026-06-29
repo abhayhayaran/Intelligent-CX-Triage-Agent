@@ -63,7 +63,13 @@ jobs:
         run: npm test --prefix backend
 
       - name: Trigger Render Deployment Webhook
-        if: github.ref == 'refs/heads/main' && success() && secrets.RENDER_DEPLOY_HOOK_URL != ''
+        if: github.ref == 'refs/heads/main' && success()
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
-          echo "🚀 All integration tests passed! Triggering Render deploy hook..."
-          curl -f -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "⚠️ RENDER_DEPLOY_HOOK_URL secret is not set in GitHub Repository Secrets. Skipping deployment."
+          else
+            echo "🚀 All integration tests passed! Triggering Render deploy hook..."
+            curl -f -X POST "$RENDER_DEPLOY_HOOK_URL"
+          fi
