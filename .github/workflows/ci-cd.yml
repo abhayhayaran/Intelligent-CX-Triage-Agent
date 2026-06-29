@@ -41,17 +41,20 @@ jobs:
       - name: Generate Prisma Client
         env:
           DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
-        run: npx prisma generate --schema backend/prisma/schema.prisma
+        working-directory: backend
+        run: npx prisma generate
 
       - name: Synchronize Database Schema
         env:
           DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
-        run: npx prisma db push --schema backend/prisma/schema.prisma
+        working-directory: backend
+        run: npx prisma db push --accept-data-loss --skip-generate
 
       - name: Run Vitest Integration Tests
         env:
           DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
-        run: npm test --prefix backend
+        working-directory: backend
+        run: npm test
 
       - name: Trigger Render Deployment Webhook
         if: github.ref == 'refs/heads/main' && success()
