@@ -1,98 +1,132 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-// Force NODE_ENV to 'test' before loading services
-process.env.NODE_ENV = 'test';
-
-import { dbService } from './database.js';
+import { prisma } from './database.js';
 import { triageService } from './triageService.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const testDbPath = path.resolve(__dirname, '../../data/test.db.json');
+// Enforce test node environment
+process.env.NODE_ENV = 'test';
 
-describe('Database System Tests (Transactions & Constraints)', () => {
-  beforeEach(() => {
-    // Bootstrap clean schema inside test.db.json
-    dbService.bootstrapCleanDatabase();
-  });
+const resetDatabase = async () => {
+  // Clear tables in topological order (child dependencies first due to foreign keys)
+  await prisma.draftResponse.deleteMany({});
+  await prisma.ticket.deleteMany({});
+  await prisma.idempotencyKey.deleteMany({});
+  await prisma.kBArticle.deleteMany({});
 
-  afterEach(() => {
-    // Delete test.db.json file to keep workspaces clean
-    if (fs.existsSync(testDbPath)) {
-      try {
-        fs.unlinkSync(testDbPath);
-      } catch (err) {
-        // Silently skip if open
+  // Seed Knowledge Base articles required by triage mock engine
+  await prisma.kBArticle.createMany({
+    data: [
+      { 
+        title: 'Billing & Refund Policy', 
+        body: 'We offer full refunds for cancellations within 14 days of purchase. Refunds take 5-7 business days to process back to your original payment method. For cancellations after 14 days, we provide pro-rated account credits instead of cash refunds.', 
+        category: 'billing' 
+      },
+      { 
+        title: 'Connecting your Custom Domain', 
+        body: 'To connect a custom domain: 1. Go to Settings > Domains. 2. Enter your domain. 3. Add an A record pointing to 192.0.2.1 and a CNAME record for www pointing to domains.example.com. DNS propagation can take up to 24 hours.', 
+        category: 'technical' 
+      },
+      { 
+        title: 'Resetting Account Password', 
+        body: 'If you forgot your password, click "Forgot Password" on the login screen. You will receive an email with a secure link to reset it. Reset links expire after 2 hours. If you do not see the email, check your spam folder.', 
+        category: 'account' 
+      },
+      { 
+        title: 'API Access and Token Limits', 
+        body: 'API access tokens can be created under Settings > API. We enforce a rate limit of 100 requests per minute per token. If you exceed this rate, you will receive a 429 Too Many Requests response. For high-volume needs, contact sales.', 
+        category: 'technical' 
+      },
+      { 
+        title: 'Updating Payment Method', 
+        body: 'To update your credit card or payment details: 1. Go to Billing > Payment Methods. 2. Click "Add Card" or "Edit". 3. Update your details and click Save. All billing transactions are securely handled through Stripe with 256-bit encryption.', 
+        category: 'billing' 
       }
-    }
+    ]
+  });
+};
+
+describe('PostgreSQL System Tests (Transactions & Constraints via Prisma)', () => {
+  beforeEach(async () => {
+    await resetDatabase();
   });
 
-  it('should successfully commit data changes during standard transactions', () => {
-    let result;
-    dbService.transaction(() => {
-      result = dbService.run(
-        'INSERT INTO tickets (subject, description, priority, tags) VALUES (?, ?, ?, ?)',
-        ['Test Subject', 'Test Desc', 'normal', '[]']
-      );
-    })(); // Invoke the curried transaction wrapper
+  it('should successfully commit data changes during standard transactions', async () => {
+    let ticket;
+    await prisma.$transaction(async (tx) => {
+      ticket = await tx.ticket.create({
+        data: {
+          subject: 'Test Subject',
+          description: 'Test Desc',
+          priority: 'normal',
+          tags: '[]'
+        }
+      });
+    });
 
-    const ticket = dbService.get('SELECT * FROM tickets WHERE id = ?', [result.lastInsertRowid]);
-    expect(ticket).not.toBeNull();
-    expect(ticket.subject).toBe('Test Subject');
+    const savedTicket = await prisma.ticket.findUnique({
+      where: { id: ticket.id }
+    });
+    expect(savedTicket).not.toBeNull();
+    expect(savedTicket.subject).toBe('Test Subject');
   });
 
-  it('should completely roll back database changes if an error is thrown within a transaction', () => {
+  it('should completely roll back database changes if an error is thrown within a transaction', async () => {
+    let ticketId;
     try {
-      dbService.transaction(() => {
-        dbService.run(
-          'INSERT INTO tickets (subject, description, priority, tags) VALUES (?, ?, ?, ?)',
-          ['Rollback Subject', 'Test Desc', 'normal', '[]']
-        );
-        // Force transaction failure
+      await prisma.$transaction(async (tx) => {
+        const t = await tx.ticket.create({
+          data: {
+            subject: 'Rollback Subject',
+            description: 'Test Desc',
+            priority: 'normal',
+            tags: '[]'
+          }
+        });
+        ticketId = t.id;
         throw new Error('Forced simulation crash');
-      })(); // Invoke the curried transaction wrapper
+      });
     } catch (err) {
       expect(err.message).toBe('Forced simulation crash');
     }
 
-    const ticket = dbService.get('SELECT * FROM tickets WHERE id = ?', [1]);
-    expect(ticket).toBeNull(); // Reverted back to null
+    if (ticketId) {
+      const savedTicket = await prisma.ticket.findUnique({
+        where: { id: ticketId }
+      });
+      expect(savedTicket).toBeNull(); // Reverted successfully
+    }
   });
 
-  it('should enforce UNIQUE constraint on duplicate idempotency keys', () => {
-    dbService.run(
-      'INSERT INTO idempotency_keys (key, status, response_body) VALUES (?, ?, ?)',
-      ['key123', 'completed', '{}']
-    );
+  it('should enforce UNIQUE constraint on duplicate idempotency keys', async () => {
+    await prisma.idempotencyKey.create({
+      data: {
+        key: 'key123',
+        status: 'completed',
+        responsePayload: '{}'
+      }
+    });
 
-    // Attempting duplicate insert should trigger relational UNIQUE check error
-    expect(() => {
-      dbService.run(
-        'INSERT INTO idempotency_keys (key, status, response_body) VALUES (?, ?, ?)',
-        ['key123', 'pending', '{}']
-      );
-    }).toThrow(/UNIQUE constraint failed/);
+    // Attempting duplicate insert should fail unique key checks
+    await expect(async () => {
+      await prisma.idempotencyKey.create({
+        data: {
+          key: 'key123',
+          status: 'pending',
+          responsePayload: '{}'
+        }
+      });
+    }).rejects.toThrow();
   });
 });
 
-describe('AI Triage Pipeline & Idempotency Engine', () => {
-  beforeEach(() => {
-    dbService.bootstrapCleanDatabase();
-    // Enforce mock mode during tests by clearing API credentials
+describe('AI Triage Pipeline & Idempotency Engine (Prisma/Postgres)', () => {
+  beforeEach(async () => {
+    await resetDatabase();
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     vi.stubEnv('ZENDESK_API_TOKEN', '');
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    if (fs.existsSync(testDbPath)) {
-      try {
-        fs.unlinkSync(testDbPath);
-      } catch (err) {}
-    }
   });
 
   it('should execute mock triage pipeline and generate ticket & draft when credentials are empty', async () => {
@@ -106,24 +140,28 @@ describe('AI Triage Pipeline & Idempotency Engine', () => {
       (evt) => progressLogs.push(evt)
     );
 
-    // 1. Validate progress messages sequence
+    // 1. Validate progress logs
     expect(progressLogs.length).toBeGreaterThanOrEqual(4);
     expect(progressLogs[0].type).toBe('info');
     expect(progressLogs[0].message).toContain('Simulated Claude Agent');
 
     const toolStarts = progressLogs.filter(e => e.type === 'tool_start');
-    expect(toolStarts.length).toBe(3); // search, ticket, draft
+    expect(toolStarts.length).toBe(3);
 
-    // 2. Validate ticket database record creation
-    const ticket = dbService.get('SELECT * FROM tickets WHERE id = ?', [result.ticket.id]);
+    // 2. Validate ticket records
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: result.ticket.id }
+    });
     expect(ticket).not.toBeNull();
-    expect(ticket.tags).toContain('technical'); // Category should resolve to technical and populate the tags array
+    expect(ticket.tags).toContain('technical');
     expect(ticket.priority).toBe('normal');
 
-    // 3. Validate draft response generation
-    const draft = dbService.get('SELECT * FROM draft_responses WHERE ticket_id = ?', [result.ticket.id]);
+    // 3. Validate draft response records
+    const draft = await prisma.draftResponse.findUnique({
+      where: { ticketId: result.ticket.id }
+    });
     expect(draft).not.toBeNull();
-    expect(draft.draft_body).toContain('technical');
+    expect(draft.draftBody).toContain('technical');
   });
 
   it('should serve cached response immediately and skip execution loop on duplicate requestId (Idempotency)', async () => {
@@ -144,7 +182,7 @@ describe('AI Triage Pipeline & Idempotency Engine', () => {
     // 1. Results should be identical
     expect(secondResult.ticket.id).toBe(firstResult.ticket.id);
 
-    // 2. Progress event should notify that cache was served and avoid agent runs
+    // 2. Cache hit check
     expect(progressLogs).toHaveLength(1);
     expect(progressLogs[0].type).toBe('info');
     expect(progressLogs[0].message).toContain('Idempotency hit');

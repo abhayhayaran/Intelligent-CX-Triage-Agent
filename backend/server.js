@@ -1,3 +1,4 @@
+import './src/instrumentation.js'; // Must be imported first to auto-instrument later imports
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -5,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { triageService } from './src/services/triageService.js';
 import { zendeskClient } from './src/services/zendeskClient.js';
-import { dbService } from './src/services/database.js';
+import { prisma } from './src/services/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,8 +100,20 @@ app.post('/api/triage', async (req, res) => {
  */
 app.get('/api/tickets', async (req, res) => {
   try {
-    const tickets = dbService.query('SELECT * FROM tickets ORDER BY id DESC');
-    return res.json(tickets);
+    const tickets = await prisma.ticket.findMany({
+      orderBy: { id: 'desc' }
+    });
+    // Format to align with tags payload parsing expectations
+    const formattedTickets = tickets.map(t => ({
+      id: t.id,
+      subject: t.subject,
+      description: t.description,
+      priority: t.priority,
+      status: t.status,
+      tags: t.tags,
+      created_at: t.createdAt.toISOString()
+    }));
+    return res.json(formattedTickets);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: err.message });

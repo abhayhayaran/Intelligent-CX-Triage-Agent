@@ -1,4 +1,4 @@
-import { dbService } from './database.js';
+import { prisma } from './database.js';
 
 const getEnvCredentials = () => {
   const subdomain = process.env.ZENDESK_SUBDOMAIN;
@@ -63,10 +63,15 @@ export const zendeskClient = {
       }));
     } else {
       console.log(`[Zendesk MOCK] Querying local database for: "${queryText}"`);
-      // Search mock database using simple LIKE search
-      const sql = 'SELECT * FROM kb_articles WHERE title LIKE ? OR body LIKE ?';
-      const term = `%${queryText}%`;
-      return dbService.query(sql, [term, term]);
+      // Search mock database using Prisma insensitive query
+      return prisma.kBArticle.findMany({
+        where: {
+          OR: [
+            { title: { contains: queryText, mode: 'insensitive' } },
+            { body: { contains: queryText, mode: 'insensitive' } }
+          ]
+        }
+      });
     }
   },
 
@@ -104,22 +109,26 @@ export const zendeskClient = {
       };
     } else {
       console.log(`[Zendesk MOCK] Creating mock ticket in local database`);
-      // Insert mock ticket into local SQLite DB
+      // Insert mock ticket using Prisma client
       const tagsStr = typeof tags === 'string' ? tags : JSON.stringify(tags || []);
-      const sql = `
-        INSERT INTO tickets (subject, description, priority, tags, status)
-        VALUES (?, ?, ?, ?, 'new')
-      `;
-      const result = dbService.run(sql, [subject, description, priority, tagsStr]);
+      const ticket = await prisma.ticket.create({
+        data: {
+          subject,
+          description,
+          priority,
+          tags: tagsStr,
+          status: 'new'
+        }
+      });
       
       return {
-        id: result.lastInsertRowid,
-        subject,
-        description,
-        priority,
-        status: 'new',
-        tags: tagsStr,
-        created_at: new Date().toISOString()
+        id: ticket.id,
+        subject: ticket.subject,
+        description: ticket.description,
+        priority: ticket.priority,
+        status: ticket.status,
+        tags: ticket.tags,
+        created_at: ticket.createdAt.toISOString()
       };
     }
   },
@@ -144,11 +153,21 @@ export const zendeskClient = {
       };
     } else {
       console.log(`[Zendesk MOCK] Querying SQLite for ticket ID: ${ticketId}`);
-      const ticket = dbService.get('SELECT * FROM tickets WHERE id = ?', [ticketId]);
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: Number(ticketId) }
+      });
       if (!ticket) {
         throw new Error(`Ticket with ID ${ticketId} not found in mock database.`);
       }
-      return ticket;
+      return {
+        id: ticket.id,
+        subject: ticket.subject,
+        description: ticket.description,
+        priority: ticket.priority,
+        status: ticket.status,
+        tags: ticket.tags,
+        created_at: ticket.createdAt.toISOString()
+      };
     }
   },
 
@@ -161,7 +180,9 @@ export const zendeskClient = {
     
     // Check if the ticket exists (if mock mode)
     if (!this.isRealMode()) {
-      const ticket = dbService.get('SELECT id FROM tickets WHERE id = ?', [ticketId]);
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: Number(ticketId) }
+      });
       if (!ticket) {
         throw new Error(`Cannot save draft: Ticket ID ${ticketId} does not exist in local DB.`);
       }
@@ -169,23 +190,27 @@ export const zendeskClient = {
 
     const tagsStr = typeof suggestedTags === 'string' ? suggestedTags : JSON.stringify(suggestedTags || []);
 
-    const sql = `
-      INSERT INTO draft_responses (ticket_id, draft_body, confidence_score, suggested_tags)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(ticket_id) DO UPDATE SET
-        draft_body = excluded.draft_body,
-        confidence_score = excluded.confidence_score,
-        suggested_tags = excluded.suggested_tags,
-        created_at = CURRENT_TIMESTAMP
-    `;
-    
-    dbService.run(sql, [ticketId, draftBody, confidenceScore, tagsStr]);
+    const draft = await prisma.draftResponse.upsert({
+      where: { ticketId: Number(ticketId) },
+      update: {
+        draftBody,
+        confidenceScore,
+        suggestedTags: tagsStr,
+        createdAt: new Date()
+      },
+      create: {
+        ticketId: Number(ticketId),
+        draftBody,
+        confidenceScore,
+        suggestedTags: tagsStr
+      }
+    });
 
     return {
-      ticket_id: ticketId,
-      draft_body: draftBody,
-      confidence_score: confidenceScore,
-      suggested_tags: tagsStr
+      ticket_id: draft.ticketId,
+      draft_body: draft.draftBody,
+      confidence_score: draft.confidenceScore,
+      suggested_tags: draft.suggestedTags
     };
   },
 
@@ -194,7 +219,15 @@ export const zendeskClient = {
    */
   async getDraftResponse(ticketId) {
     console.log(`[DB] Fetching agent draft response for Ticket ID: ${ticketId}`);
-    const draft = dbService.get('SELECT * FROM draft_responses WHERE ticket_id = ?', [ticketId]);
-    return draft || null;
+    const draft = await prisma.draftResponse.findUnique({
+      where: { ticketId: Number(ticketId) }
+    });
+    if (!draft) return null;
+    return {
+      ticket_id: draft.ticketId,
+      draft_body: draft.draftBody,
+      confidence_score: draft.confidenceScore,
+      suggested_tags: draft.suggestedTags
+    };
   }
 };

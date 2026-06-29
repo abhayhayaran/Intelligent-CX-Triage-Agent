@@ -1,0 +1,50 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model IdempotencyKey {
+  key             String   @id
+  status          String   // 'pending', 'completed', 'failed'
+  responsePayload String?  @map("response_payload") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("idempotency_keys")
+}
+
+model Ticket {
+  id            Int            @id @default(autoincrement())
+  subject       String
+  description   String         @db.Text
+  priority      String
+  status        String         @default("new")
+  tags          String         @db.Text // Serialized JSON array of tags to maintain compatibility
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  draftResponse DraftResponse?
+
+  @@map("tickets")
+}
+
+model KBArticle {
+  id       Int    @id @default(autoincrement())
+  title    String
+  body     String @db.Text
+  category String
+
+  @@map("kb_articles")
+}
+
+model DraftResponse {
+  ticketId        Int      @id @map("ticket_id")
+  draftBody       String   @map("draft_body") @db.Text
+  confidenceScore Float    @map("confidence_score")
+  suggestedTags   String   @map("suggested_tags") @db.Text // Serialized JSON array of tags
+  createdAt       DateTime @default(now()) @map("created_at")
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("draft_responses")
+}

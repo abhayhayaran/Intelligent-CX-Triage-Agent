@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { dbService } from './database.js';
+import { prisma } from './database.js';
 import { zendeskClient } from './zendeskClient.js';
 
 // Schema declarations for Claude Tools
@@ -70,16 +70,20 @@ export const triageService = {
       throw new Error('Request ID is required for idempotency tracking.');
     }
 
-    // 1. Enforce Idempotency constraint using a SQLite Transaction
+    // 1. Enforce Idempotency constraint using a Prisma Transaction
     let existingRequest;
     try {
-      dbService.transaction(() => {
-        existingRequest = dbService.get('SELECT * FROM idempotency_keys WHERE key = ?', [requestId]);
+      await prisma.$transaction(async (tx) => {
+        existingRequest = await tx.idempotencyKey.findUnique({
+          where: { key: requestId }
+        });
         if (!existingRequest) {
           // Reserve the key with a 'pending' status
-          dbService.run('INSERT INTO idempotency_keys (key, status) VALUES (?, ?)', [requestId, 'pending']);
+          await tx.idempotencyKey.create({
+            data: { key: requestId, status: 'pending' }
+          });
         }
-      })();
+      });
     } catch (err) {
       throw new Error(`Database transaction error checking idempotency: ${err.message}`);
     }
@@ -89,13 +93,16 @@ export const triageService = {
       if (existingRequest.status === 'completed') {
         console.log(`[Idempotency] Key ${requestId} hit. Returning cached response.`);
         onProgress({ type: 'info', message: `Idempotency hit! Returning cached ticket for key: ${requestId}` });
-        return JSON.parse(existingRequest.response_payload);
+        return JSON.parse(existingRequest.responsePayload);
       } else if (existingRequest.status === 'pending') {
         console.warn(`[Idempotency] Key ${requestId} is already processing.`);
         throw new Error('Conflict: A request with this ID is already in progress.');
       } else {
-        // If it failed before, delete the pending key or update to pending to allow retry
-        dbService.run('UPDATE idempotency_keys SET status = ? WHERE key = ?', ['pending', requestId]);
+        // If it failed before, update to pending to allow retry
+        await prisma.idempotencyKey.update({
+          where: { key: requestId },
+          data: { status: 'pending' }
+        });
       }
     }
 
@@ -112,16 +119,22 @@ export const triageService = {
       }
 
       // Update idempotency to completed
-      dbService.run(
-        'UPDATE idempotency_keys SET status = ?, response_payload = ? WHERE key = ?',
-        ['completed', JSON.stringify(finalResult), requestId]
-      );
+      await prisma.idempotencyKey.update({
+        where: { key: requestId },
+        data: {
+          status: 'completed',
+          responsePayload: JSON.stringify(finalResult)
+        }
+      });
 
       return finalResult;
     } catch (err) {
       console.error('Triage agent loop failed:', err);
       // Clean up idempotency so user can retry
-      dbService.run('UPDATE idempotency_keys SET status = ? WHERE key = ?', ['failed', requestId]);
+      await prisma.idempotencyKey.update({
+        where: { key: requestId },
+        data: { status: 'failed' }
+      }).catch(dbErr => console.error('Failed to clean up idempotency key:', dbErr));
       throw err;
     }
   },
