@@ -134,6 +134,55 @@ export const zendeskClient = {
   },
 
   /**
+   * Update an existing ticket's priority and tags.
+   */
+  async updateTicket(ticketId, { priority, tags }) {
+    const credentials = getEnvCredentials();
+
+    if (credentials) {
+      console.log(`[Zendesk API] Updating ticket ID ${ticketId} in Zendesk`);
+      const path = `/api/v2/tickets/${ticketId}.json`;
+      const body = {
+        ticket: {
+          priority,
+          tags: Array.isArray(tags) ? tags : JSON.parse(tags || '[]')
+        }
+      };
+
+      const result = await makeZendeskRequest(credentials, path, {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      });
+
+      return {
+        id: result.ticket.id,
+        subject: result.ticket.subject,
+        priority: result.ticket.priority,
+        status: result.ticket.status,
+        tags: JSON.stringify(result.ticket.tags)
+      };
+    } else {
+      console.log(`[Zendesk MOCK] Updating ticket ID ${ticketId} in local database`);
+      const tagsStr = typeof tags === 'string' ? tags : JSON.stringify(tags || []);
+      const ticket = await prisma.ticket.update({
+        where: { id: Number(ticketId) },
+        data: {
+          priority,
+          tags: tagsStr
+        }
+      });
+
+      return {
+        id: ticket.id,
+        subject: ticket.subject,
+        priority: ticket.priority,
+        status: ticket.status,
+        tags: ticket.tags
+      };
+    }
+  },
+
+  /**
    * Fetch details of a single ticket (used by the ZAF frontend app)
    */
   async getTicket(ticketId) {

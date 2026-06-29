@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from './database.js';
 import { zendeskClient } from './zendeskClient.js';
 
-// Schema declarations for Claude Tools
+// Schema declarations for Claude Tools (Ticket Creation Mode)
 const TOOLS = [
   {
     name: 'search_knowledge_base',
@@ -45,6 +45,46 @@ const TOOLS = [
   }
 ];
 
+// Schema declarations for Claude Tools (Webhook Ticket Update Mode)
+const TOOLS_UPDATE = (existingTicketId) => [
+  {
+    name: 'search_knowledge_base',
+    description: 'Search the local Help Center knowledge base for articles that can resolve the customer query. Use this tool if the customer query asks a question or reports an issue that might have an existing solution/policy.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query containing keywords relevant to the customer request.' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'update_zendesk_ticket',
+    description: `Update the existing Zendesk ticket with priority based on sentiment analysis (low, normal, high, urgent) and tags classifying the ticket. The ticket ID is ${existingTicketId}.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'], description: 'Priority level based on tone, urgency, and severity of issue.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to categorize the issue (e.g. ["billing", "refund", "bug", "password_reset", "api"]).' }
+      },
+      required: ['priority', 'tags']
+    }
+  },
+  {
+    name: 'draft_agent_response',
+    description: `Pre-write a response for the human agent to send to the customer. Save the drafted reply body, a confidence score (0.0 to 1.0), and suggested tags. The ticket ID is ${existingTicketId}. You MUST search the knowledge base first if the customer has a specific question, and utilize any relevant KB articles to make the response highly accurate.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        draftBody: { type: 'string', description: 'The drafted email response to the customer. Maintain a helpful, empathetic, and professional tone.' },
+        confidenceScore: { type: 'number', description: 'Confidence level of the draft response accuracy (0.0 to 1.0) based on KB matches.' },
+        suggestedTags: { type: 'array', items: { type: 'string' }, description: 'Refined suggested tags for this response.' }
+      },
+      required: ['draftBody', 'confidenceScore', 'suggestedTags']
+    }
+  }
+];
+
 const SYSTEM_PROMPT = `
 You are the Intelligent CX Triage Agent. Your job is to process incoming customer support requests and triage them in Zendesk.
 
@@ -61,11 +101,27 @@ Follow this strict tool execution sequence:
 3. [Mandatory] draft_agent_response
 `;
 
+const getSystemPromptUpdate = (existingTicketId) => `
+You are the Intelligent CX Triage Agent. Your job is to process incoming customer support requests and triage them in Zendesk. The ticket has ALREADY been created in Zendesk with ID: ${existingTicketId}.
+
+CRITICAL WORKFLOW CONSTRAINTS:
+1. You MUST ALWAYS update the existing Zendesk ticket by calling the "update_zendesk_ticket" tool. This is mandatory.
+2. If the query involves a question, setup help, or billing issue, you MUST search the Help Center using the "search_knowledge_base" tool BEFORE updating the ticket so you have context for your draft.
+3. After calling "update_zendesk_ticket", you MUST immediately call the "draft_agent_response" tool to save your drafted reply for the human support agent in the database.
+4. DO NOT provide the full customer support instructions or detailed answer directly in your final chat reply. Instead, save the detailed answer inside the "draftBody" of the "draft_agent_response" tool call.
+5. Your final text response should ONLY be a brief summary of the actions you performed (e.g. ticket updated, tags applied, and draft saved).
+
+Follow this strict tool execution sequence:
+1. [Optional] search_knowledge_base (based on query relevance)
+2. [Mandatory] update_zendesk_ticket
+3. [Mandatory] draft_agent_response
+`;
+
 export const triageService = {
   /**
    * Orchestrates the agent loop
    */
-  async processTriage(requestId, query, onProgress) {
+  async processTriage(requestId, query, onProgress, existingTicketId = null) {
     if (!requestId) {
       throw new Error('Request ID is required for idempotency tracking.');
     }
@@ -110,12 +166,12 @@ export const triageService = {
       let finalResult;
       const apiKey = process.env.ANTHROPIC_API_KEY;
 
-      if (apiKey && apiKey !== 'your_anthropic_api_key_here') {
+      if (apiKey && apiKey !== 'your_anthropic_api_key_here' && apiKey !== '') {
         // Run Real Claude Agent
-        finalResult = await this.runRealClaude(query, onProgress);
+        finalResult = await this.runRealClaude(query, onProgress, existingTicketId);
       } else {
         // Run Simulated Agent
-        finalResult = await this.runMockAgent(query, onProgress);
+        finalResult = await this.runMockAgent(query, onProgress, existingTicketId);
       }
 
       // Update idempotency to completed
@@ -142,32 +198,28 @@ export const triageService = {
   /**
    * Real Claude SDK Agent Execution
    */
-  async runRealClaude(query, onProgress) {
+  async runRealClaude(query, onProgress, existingTicketId = null) {
     onProgress({ type: 'info', message: 'Starting Claude Orchestration Loop...' });
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     
     let messages = [{ role: 'user', content: query }];
     let continueLoop = true;
-    let createdTicket = null;
+    let triagedTicket = null;
     let savedDraft = null;
     let finalSummary = '';
+
+    const systemPrompt = existingTicketId ? getSystemPromptUpdate(existingTicketId) : SYSTEM_PROMPT;
+    const tools = existingTicketId ? TOOLS_UPDATE(existingTicketId) : TOOLS;
 
     while (continueLoop) {
       onProgress({ type: 'info', message: 'Invoking Claude...' });
       const response = await anthropic.messages.create({
         model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
         max_tokens: 4000,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages,
-        tools: TOOLS
+        tools: tools
       });
-    // 'claude-3-5-sonnet-20240620'
-    // 'claude-3-opus-20240229'
-    // 'claude-3-sonnet-20240229'
-    // 'claude-3-haiku-20240307'
-    // 'claude-2.1'
-    // 'claude-2.0'
-    // 'claude-instant-1.2'
 
       // Add Claude's response to the message history
       messages.push({ role: 'assistant', content: response.content });
@@ -190,15 +242,22 @@ export const triageService = {
             if (name === 'search_knowledge_base') {
               result = await zendeskClient.searchKnowledgeBase(input.query);
             } else if (name === 'create_zendesk_ticket') {
-              createdTicket = await zendeskClient.createTicket({
+              triagedTicket = await zendeskClient.createTicket({
                 subject: input.subject,
                 description: input.description,
                 priority: input.priority,
                 tags: input.tags
               });
-              result = createdTicket;
+              result = triagedTicket;
+            } else if (name === 'update_zendesk_ticket') {
+              triagedTicket = await zendeskClient.updateTicket(existingTicketId, {
+                priority: input.priority,
+                tags: input.tags
+              });
+              result = triagedTicket;
             } else if (name === 'draft_agent_response') {
-              savedDraft = await zendeskClient.saveDraftResponse(input.ticketId, {
+              const targetTicketId = input.ticketId || existingTicketId;
+              savedDraft = await zendeskClient.saveDraftResponse(targetTicketId, {
                 draftBody: input.draftBody,
                 confidenceScore: input.confidenceScore,
                 suggestedTags: input.suggestedTags
@@ -251,7 +310,7 @@ export const triageService = {
     return {
       success: true,
       mode: 'claude',
-      ticket: createdTicket,
+      ticket: triagedTicket,
       draft: savedDraft,
       summary: finalSummary
     };
@@ -260,7 +319,7 @@ export const triageService = {
   /**
    * Simulated Agent Execution (Runs if Anthropic API Key is not set)
    */
-  async runMockAgent(query, onProgress) {
+  async runMockAgent(query, onProgress, existingTicketId = null) {
     onProgress({ type: 'info', message: 'Starting Simulated Claude Agent (No API Key found)...' });
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -301,44 +360,67 @@ export const triageService = {
       result: kbResults 
     });
 
-    // 3. Perform create_zendesk_ticket
+    // 3. Perform create or update zendesk ticket
     const priority = lowercaseQuery.includes('urgent') || lowercaseQuery.includes('immediate') || lowercaseQuery.includes('frustrated') ? 'urgent' : 'normal';
     const subject = `Triaged: issue regarding ${category}`;
     const tags = [category, 'triaged'];
     if (priority === 'urgent') tags.push('high_priority');
 
-    onProgress({ 
-      type: 'tool_start', 
-      tool: 'create_zendesk_ticket', 
-      input: { subject, description: query, priority, tags } 
-    });
+    let ticket;
+    if (existingTicketId) {
+      onProgress({ 
+        type: 'tool_start', 
+        tool: 'update_zendesk_ticket', 
+        input: { priority, tags } 
+      });
 
-    await sleep(1000);
-    const ticket = await zendeskClient.createTicket({
-      subject,
-      description: query,
-      priority,
-      tags
-    });
+      await sleep(1000);
+      ticket = await zendeskClient.updateTicket(existingTicketId, {
+        priority,
+        tags
+      });
 
-    onProgress({ 
-      type: 'tool_success', 
-      tool: 'create_zendesk_ticket', 
-      result: ticket 
-    });
+      onProgress({ 
+        type: 'tool_success', 
+        tool: 'update_zendesk_ticket', 
+        result: ticket 
+      });
+    } else {
+      onProgress({ 
+        type: 'tool_start', 
+        tool: 'create_zendesk_ticket', 
+        input: { subject, description: query, priority, tags } 
+      });
+
+      await sleep(1000);
+      ticket = await zendeskClient.createTicket({
+        subject,
+        description: query,
+        priority,
+        tags
+      });
+
+      onProgress({ 
+        type: 'tool_success', 
+        tool: 'create_zendesk_ticket', 
+        result: ticket 
+      });
+    }
+
+    const ticketIdToSave = existingTicketId || ticket.id;
 
     // 4. Perform draft_agent_response
     let articleInfo = kbResults.length > 0 ? kbResults[0].body : 'Please refer to standard guidelines.';
-    let draftBody = `Hi there,\n\nThank you for reaching out. I understand you have a question regarding ${category}.\n\nBased on our guidelines: ${articleInfo}\n\nOur support team has logged this under Ticket #${ticket.id} with ${priority} priority. We will follow up shortly.\n\nBest regards,\nCustomer Support AI`;
+    let draftBody = `Hi there,\n\nThank you for reaching out. I understand you have a question regarding ${category}.\n\nBased on our guidelines: ${articleInfo}\n\nOur support team has logged this under Ticket #${ticketIdToSave} with ${priority} priority. We will follow up shortly.\n\nBest regards,\nCustomer Support AI`;
     
     onProgress({ 
       type: 'tool_start', 
       tool: 'draft_agent_response', 
-      input: { ticketId: ticket.id, draftBody, confidenceScore: kbResults.length > 0 ? 0.9 : 0.4, suggestedTags: tags } 
+      input: { ticketId: ticketIdToSave, draftBody, confidenceScore: kbResults.length > 0 ? 0.9 : 0.4, suggestedTags: tags } 
     });
 
     await sleep(1000);
-    const draft = await zendeskClient.saveDraftResponse(ticket.id, {
+    const draft = await zendeskClient.saveDraftResponse(ticketIdToSave, {
       draftBody,
       confidenceScore: kbResults.length > 0 ? 0.9 : 0.4,
       suggestedTags: tags
@@ -352,7 +434,7 @@ export const triageService = {
 
     await sleep(500);
     
-    const summary = `Successfully completed triaging request. Created mock ticket #${ticket.id} with ${priority} priority and drafted an appropriate customer response based on help center policies.`;
+    const summary = `Successfully completed triaging request. ${existingTicketId ? 'Updated' : 'Created'} mock ticket #${ticketIdToSave} with ${priority} priority and drafted an appropriate customer response based on help center policies.`;
     onProgress({ type: 'info', message: 'Triage complete!' });
 
     return {
