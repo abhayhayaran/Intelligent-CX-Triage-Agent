@@ -68,22 +68,24 @@ app.get('/api/config', (req, res) => {
  * Trigger triage pipeline
  */
 app.post('/api/triage', async (req, res) => {
-  const { query, requestId } = req.body;
+  const { query, requestId, ticketId, existingTicketId } = req.body;
+  const targetExistingTicketId = ticketId || existingTicketId || null;
+  const targetRequestId = requestId || (targetExistingTicketId ? `ticket-${targetExistingTicketId}` : null);
 
-  if (!query || !requestId) {
-    return res.status(400).json({ error: 'Both query and requestId (idempotency key) are required.' });
+  if (!query || !targetRequestId) {
+    return res.status(400).json({ error: 'Both query and a unique identifier (requestId or ticketId) are required.' });
   }
 
   // Define progress callback that sends events via SSE to the matching client
   const onProgress = (event) => {
-    const client = sseClients.get(requestId);
+    const client = sseClients.get(targetRequestId);
     if (client) {
       client.write(`data: ${JSON.stringify(event)}\n\n`);
     }
   };
 
   try {
-    const result = await triageService.processTriage(requestId, query, onProgress);
+    const result = await triageService.processTriage(targetRequestId, query, onProgress, targetExistingTicketId);
     
     // Send complete event before response finishes
     onProgress({ type: 'complete', result });

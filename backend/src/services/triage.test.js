@@ -187,4 +187,47 @@ describe('AI Triage Pipeline & Idempotency Engine (Prisma/Postgres)', () => {
     expect(progressLogs[0].type).toBe('info');
     expect(progressLogs[0].message).toContain('Idempotency hit');
   });
+
+  it('should support updating an existing ticket (Zendesk Webhook mode) and write updates & drafts to the same ticket ID', async () => {
+    // 1. Pre-create a ticket representing the Zendesk ticket that triggered the webhook
+    const initialTicket = await prisma.ticket.create({
+      data: {
+        subject: 'User Inquiry',
+        description: 'I need to cancel my subscription.',
+        priority: 'low',
+        tags: '["user_submit"]'
+      }
+    });
+
+    const customerQuery = 'I need to cancel my subscription and get a refund immediately.';
+    const progressLogs = [];
+
+    // Trigger processTriage in update mode by passing existingTicketId
+    const result = await triageService.processTriage(
+      `ticket-${initialTicket.id}`,
+      customerQuery,
+      (evt) => progressLogs.push(evt),
+      initialTicket.id
+    );
+
+    // 2. Verify update tool starts instead of create tool
+    const toolStarts = progressLogs.filter(e => e.type === 'tool_start');
+    expect(toolStarts.map(t => t.tool)).toContain('update_zendesk_ticket');
+    expect(toolStarts.map(t => t.tool)).not.toContain('create_zendesk_ticket');
+
+    // 3. Verify original ticket record is updated (not cloned)
+    const updatedTicket = await prisma.ticket.findUnique({
+      where: { id: initialTicket.id }
+    });
+    expect(updatedTicket.id).toBe(initialTicket.id);
+    expect(updatedTicket.tags).toContain('billing');
+    expect(updatedTicket.priority).toBe('urgent'); // immediate refund triggers urgent
+
+    // 4. Verify draft is saved for the exact existing ticket ID
+    const draft = await prisma.draftResponse.findUnique({
+      where: { ticketId: initialTicket.id }
+    });
+    expect(draft).not.toBeNull();
+    expect(draft.draftBody).toContain('billing');
+  });
 });
