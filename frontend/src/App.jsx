@@ -18,8 +18,10 @@ export default function App() {
     zafError: null
   });
 
-  // Backend host configuration (assumes Express running on port 3001)
-  const BACKEND_HOST = 'http://localhost:3001';
+  // Backend host configuration (assumes Express running locally on port 3001 or live on Render)
+  const BACKEND_HOST = import.meta.env.DEV
+    ? 'http://localhost:3001'
+    : 'https://intelligent-cx-triage-agent.onrender.com';
 
   // 1. Initialize ZAF Context
   useEffect(() => {
