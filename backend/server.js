@@ -1,4 +1,4 @@
-import './src/instrumentation.js'; // Must be imported first to auto-instrument later imports
+import './src/instrumentation.js'; // Must be imported first to auto-instrument later imports (CI trigger)
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
