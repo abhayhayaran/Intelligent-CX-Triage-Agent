@@ -1,0 +1,63 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: secret_password
+          POSTGRES_DB: triage_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Install Backend Dependencies
+        run: npm ci --prefix backend
+
+      - name: Generate Prisma Client
+        env:
+          DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
+        run: npx prisma generate --schema backend/prisma/schema.prisma
+
+      - name: Synchronize Database Schema
+        env:
+          DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
+        run: npx prisma db push --schema backend/prisma/schema.prisma
+
+      - name: Run Vitest Integration Tests
+        env:
+          DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
+        run: npm test --prefix backend
+
+      - name: Trigger Render Deployment Webhook
+        if: github.ref == 'refs/heads/main' && success() && secrets.RENDER_DEPLOY_HOOK_URL != ''
+        run: |
+          echo "🚀 All integration tests passed! Triggering Render deploy hook..."
+          curl -f -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
