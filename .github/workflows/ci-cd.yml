@@ -48,7 +48,7 @@ jobs:
         env:
           DATABASE_URL: "postgresql://postgres:secret_password@localhost:5432/triage_db?schema=public"
         working-directory: backend
-        run: npx prisma db push --accept-data-loss --skip-generate
+        run: npx prisma db push --accept-data-loss
 
       - name: Run Vitest Integration Tests
         env:
